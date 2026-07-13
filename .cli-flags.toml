@@ -1,0 +1,175 @@
+# flags-2-env contract for dpm (github.com/ORESoftware/flags-2-env).
+# Every CLI flag maps to an environment variable; precedence is
+# CLI flag > process env > default declared here.
+
+[help]
+url = "https://github.com/ORESoftware/declarative-postgres-migrate.rs"
+columns = ["options", "env", "type", "default", "description"]
+
+[parse]
+stop_at_first_positional = false
+positionals_env = "FLAGS2ENV_POSITIONALS"
+
+[flags.source]
+env = "SOURCE_DATABASE_URL"
+aliases = ["source", "from", "desired"]
+short = "s"
+type = "string"
+help = "Desired state: postgres:// URL, catalog .json dump, or schema .sql file."
+
+[flags.target]
+env = "TARGET_DATABASE_URL"
+aliases = ["target", "to", "current"]
+short = "t"
+type = "string"
+help = "Current state to converge: postgres:// URL, .json, or .sql (diff-only). Falls back to DATABASE_URL."
+
+[flags.source-sql]
+env = "SOURCE_SQL_FILE"
+aliases = ["source-sql", "from-sql"]
+type = "string"
+help = "Explicit .sql file as the desired state (pg_dump --schema-only output works). Overrides --source."
+
+[flags.target-sql]
+env = "TARGET_SQL_FILE"
+aliases = ["target-sql", "to-sql"]
+type = "string"
+help = "Explicit .sql file as the current state (diff-only). Overrides --target."
+
+[flags.source-json]
+env = "SOURCE_CATALOG_JSON"
+aliases = ["source-json", "from-json"]
+type = "string"
+help = "Explicit catalog .json dump as the desired state. Overrides --source."
+
+[flags.target-json]
+env = "TARGET_CATALOG_JSON"
+aliases = ["target-json", "to-json"]
+type = "string"
+help = "Explicit catalog .json dump as the current state (diff-only). Overrides --target."
+
+[flags.shadow]
+env = "SHADOW_DATABASE_URL"
+aliases = ["shadow", "shadow-url", "scratch"]
+type = "string"
+help = "Server URL where dpm may CREATE/DROP throwaway databases (needed for .sql sources and verify)."
+
+[flags.schemas]
+env = "DPM_SCHEMAS"
+aliases = ["schemas"]
+type = "string"
+help = "Comma-separated schema list to diff. Default: all user schemas minus managed/system ones."
+
+[flags.exclude-schemas]
+env = "DPM_EXCLUDE_SCHEMAS"
+aliases = ["exclude-schemas"]
+type = "string"
+help = "Comma-separated schemas to exclude on top of the built-in managed-service exclusions."
+
+[flags.out]
+env = "DPM_OUT"
+aliases = ["out", "output"]
+short = "o"
+type = "string"
+help = "Write the migration script (or JSON) to this path instead of stdout."
+
+[flags.format]
+env = "DPM_FORMAT"
+aliases = ["format"]
+type = "string"
+default = "sql"
+help = "Output format for diff: sql | json (machine-readable change plan for CI/AI review)."
+
+[flags.allow-destructive-sql]
+env = "DPM_ALLOW_DESTRUCTIVE_SQL"
+aliases = ["allow-destructive-sql"]
+type = "bool"
+default = "false"
+help = "GENERATE destructive statements (drops) live in the script instead of commented out."
+
+[flags.allow-destructive-ops]
+env = "DPM_ALLOW_DESTRUCTIVE_OPS"
+aliases = ["allow-destructive-ops"]
+type = "bool"
+default = "false"
+help = "EXECUTE destructive statements during `dpm apply`. Without it, apply refuses to run a script containing live destructive SQL."
+
+[flags.allow-destructive]
+env = "DPM_ALLOW_DESTRUCTIVE"
+aliases = ["allow-destructive", "destructive"]
+type = "bool"
+default = "false"
+help = "Legacy shorthand: implies both --allow-destructive-sql and --allow-destructive-ops."
+
+[flags.yes]
+env = "DPM_YES"
+aliases = ["yes", "assume-yes"]
+short = "y"
+type = "bool"
+default = "false"
+help = "Skip the interactive confirmation before dpm apply executes SQL."
+
+[flags.fail-on-diff]
+env = "DPM_FAIL_ON_DIFF"
+aliases = ["fail-on-diff", "exit-code"]
+type = "bool"
+default = "false"
+help = "Exit 2 when differences exist (like git diff --exit-code; for CI gates)."
+
+[flags.advise-fk-indexes]
+env = "DPM_ADVISE_FK_INDEXES"
+aliases = ["advise-fk-indexes"]
+type = "bool"
+default = "true"
+help = "Append advisory comments for foreign keys lacking a supporting index."
+
+[flags.external-check]
+env = "DPM_EXTERNAL_CHECK"
+aliases = ["external-check", "external-cmd"]
+type = "string"
+help = "Cross-validation command template for verify, e.g. 'migra {target} {source}'. Empty output = agreement."
+
+[flags.keep-shadow]
+env = "DPM_KEEP_SHADOW"
+aliases = ["keep-shadow"]
+type = "bool"
+default = "false"
+help = "Keep throwaway shadow databases after verify/materialize (debugging)."
+
+[flags.verbose]
+env = "DPM_VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+default = "false"
+help = "Verbose progress logging on stderr."
+
+[flags.ai-review]
+env = "DPM_AI_REVIEW"
+aliases = ["ai-review", "ai"]
+type = "bool"
+default = "false"
+help = "Send the generated migration to an AI tool for a correctness/consistency/safety review (see --ai-tool)."
+
+[flags.ai-tool]
+env = "DPM_AI_TOOL"
+aliases = ["ai-tool"]
+type = "string"
+default = "claude"
+help = "AI reviewer CLI: claude | codex | chatgpt | gemini | custom (custom uses --ai-cmd)."
+
+[flags.ai-cmd]
+env = "DPM_AI_CMD"
+aliases = ["ai-cmd"]
+type = "string"
+help = "Custom AI review command template; {file} expands to the review-payload path, e.g. 'my-llm --prompt-file {file}'."
+
+[flags.ai-strict]
+env = "DPM_AI_STRICT"
+aliases = ["ai-strict"]
+type = "bool"
+default = "true"
+help = "Treat an AI REJECT (or unparseable verdict) as blocking: apply aborts, diff/review/verify exit 4."
+
+[env]
+ignore = ["DATABASE_URL"]

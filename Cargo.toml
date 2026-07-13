@@ -1,0 +1,34 @@
+[package]
+name = "declarative-postgres-migrate"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Declarative, ORM-agnostic Postgres schema migration: introspect two databases (or SQL files / saved catalogs), diff the catalogs, and emit reviewable SQL that converges the target onto the source."
+repository = "https://github.com/ORESoftware/declarative-postgres-migrate.rs"
+readme = "readme.md"
+
+[lib]
+name = "dpm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dpm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+libloading = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "macros",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+toml = "0.8"
+
+[profile.release]
+lto = true
+strip = true
