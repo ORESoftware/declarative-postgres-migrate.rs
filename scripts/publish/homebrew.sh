@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publish/refresh the Homebrew formula in the ORESoftware/homebrew-tap repo.
+# Publish/refresh the Homebrew formula in the declarative-migrations/homebrew-tap repo.
 # Builds a source-based formula pinned to the release tag's tarball, so it
 # works on any mac/linuxbrew arch (depends_on rust => build).
 # Usage: scripts/publish/homebrew.sh [vX.Y.Z]
@@ -8,8 +8,8 @@ cd "$(dirname "$0")/../.."
 
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 tag="${1:-v$version}"
-repo="ORESoftware/declarative-postgres-migrate.rs"
-tap_repo="ORESoftware/homebrew-tap"
+repo="declarative-migrations/declarative-postgres-migrate.rs"
+tap_repo="declarative-migrations/homebrew-tap"
 tarball="https://github.com/$repo/archive/refs/tags/$tag.tar.gz"
 
 echo "==> computing source tarball sha256 for $tag"
@@ -20,7 +20,7 @@ if gh repo view "$tap_repo" >/dev/null 2>&1; then
   gh repo clone "$tap_repo" "$workdir/tap" -- --depth 1
 else
   echo "==> creating tap repo $tap_repo"
-  gh repo create "$tap_repo" --public --description "Homebrew tap for ORESoftware tools" --clone
+  gh repo create "$tap_repo" --public --description "Homebrew tap for declarative-migrations tools" --clone
   mv homebrew-tap "$workdir/tap" 2>/dev/null || gh repo clone "$tap_repo" "$workdir/tap"
 fi
 mkdir -p "$workdir/tap/Formula"
@@ -57,4 +57,4 @@ else
   git push origin HEAD
 fi
 echo "==> published. Install with:"
-echo "    brew install oresoftware/tap/dpm"
+echo "    brew install declarative-migrations/tap/dpm"

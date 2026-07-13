@@ -262,9 +262,16 @@ pub fn emit(plan: &Plan, opts: &EmitOptions) -> Script {
             Change::CreateSequence { seq, def } => {
                 e.change(&format!("create sequence: {}", seq.label()), &[sequence_create_sql(seq, def)], false)
             }
-            Change::AlterSequence { seq, def } => {
-                e.change(&format!("alter sequence: {}", seq.label()), &[sequence_alter_sql(seq, def)], false)
-            }
+            Change::AlterSequence { seq, def } => e.change(
+                &format!(
+                    "alter sequence: {}\n\
+                     The counter is clamped into the new bounds first — Postgres rejects\n\
+                     bound changes that strand the current value outside them.",
+                    seq.label()
+                ),
+                &sequence_alter_sql(seq, def),
+                false,
+            ),
             _ => {}
         }
     }
@@ -716,18 +723,29 @@ fn sequence_create_sql(q: &QName, s: &Sequence) -> String {
     )
 }
 
-fn sequence_alter_sql(q: &QName, s: &Sequence) -> String {
-    format!(
-        "ALTER SEQUENCE {} AS {} INCREMENT BY {} MINVALUE {} MAXVALUE {} START WITH {} CACHE {}{};",
-        q.sql(),
-        s.type_sql,
-        s.increment,
-        s.min_value,
-        s.max_value,
-        s.start,
-        s.cache,
-        if s.cycle { " CYCLE" } else { " NO CYCLE" }
-    )
+fn sequence_alter_sql(q: &QName, s: &Sequence) -> Vec<String> {
+    let regclass = q.sql().replace('\'', "''");
+    vec![
+        // No-op unless the current value violates the new bounds (in which
+        // case the ALTER below would error); preserves is_called.
+        format!(
+            "SELECT setval('{regclass}', GREATEST(LEAST(last_value, {max}), {min}), is_called) FROM {seq};",
+            max = s.max_value,
+            min = s.min_value,
+            seq = q.sql(),
+        ),
+        format!(
+            "ALTER SEQUENCE {} AS {} INCREMENT BY {} MINVALUE {} MAXVALUE {} START WITH {} CACHE {}{};",
+            q.sql(),
+            s.type_sql,
+            s.increment,
+            s.min_value,
+            s.max_value,
+            s.start,
+            s.cache,
+            if s.cycle { " CYCLE" } else { " NO CYCLE" }
+        ),
+    ]
 }
 
 fn policy_create_sql(table: &QName, p: &Policy) -> String {

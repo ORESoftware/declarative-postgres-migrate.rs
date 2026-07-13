@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # dpm installer:
-#   curl -fsSL https://raw.githubusercontent.com/ORESoftware/declarative-postgres-migrate.rs/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/declarative-migrations/declarative-postgres-migrate.rs/main/scripts/install.sh | bash
 # Downloads the latest GitHub release binary for this OS/arch; falls back to
 # `cargo install --git` when no prebuilt binary matches.
 set -euo pipefail
 
-REPO="ORESoftware/declarative-postgres-migrate.rs"
+REPO="declarative-migrations/declarative-postgres-migrate.rs"
 BIN="dpm"
 INSTALL_DIR="${DPM_INSTALL_DIR:-}"
 if [ -z "$INSTALL_DIR" ]; then

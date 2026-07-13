@@ -596,3 +596,31 @@ async fn matrix_multischema() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn matrix_exclusion_and_extension_churn() {
+    let Some(admin) = admin_url() else { return };
+    verify_with_all_checkers(
+        &admin,
+        "exclusion-extension",
+        "CREATE EXTENSION IF NOT EXISTS btree_gist;\n\
+         CREATE TABLE bookings (id bigserial PRIMARY KEY, room integer NOT NULL, during tsrange NOT NULL,\n\
+           CONSTRAINT bookings_no_overlap EXCLUDE USING gist (room WITH =, during WITH &&));",
+        "CREATE TABLE bookings (id bigserial PRIMARY KEY, room integer NOT NULL, during tsrange NOT NULL);",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn matrix_sequence_churn() {
+    let Some(admin) = admin_url() else { return };
+    verify_with_all_checkers(
+        &admin,
+        "sequences",
+        "CREATE SEQUENCE order_numbers AS bigint INCREMENT BY 10 MINVALUE 100 MAXVALUE 999999999 START WITH 100 CACHE 5 CYCLE;\n\
+         CREATE SEQUENCE ticket_ids AS integer INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 START WITH 1 CACHE 1 NO CYCLE;",
+        "CREATE SEQUENCE order_numbers AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1 NO CYCLE;\n\
+         CREATE SEQUENCE stale_seq AS integer;",
+    )
+    .await;
+}

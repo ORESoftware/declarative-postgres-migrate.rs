@@ -6,13 +6,13 @@ Declarative, **ORM-agnostic** Postgres schema migration, in Rust — a library w
 
 ```sh
 # curl (prebuilt binary from the latest GitHub release; cargo fallback)
-curl -fsSL https://raw.githubusercontent.com/ORESoftware/declarative-postgres-migrate.rs/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/declarative-migrations/declarative-postgres-migrate.rs/main/scripts/install.sh | bash
 
 # Homebrew
-brew install oresoftware/tap/dpm
+brew install declarative-migrations/tap/dpm
 
 # From source
-cargo install --git https://github.com/ORESoftware/declarative-postgres-migrate.rs
+cargo install --git https://github.com/declarative-migrations/declarative-postgres-migrate.rs
 
 # Optional: the seven cross-check tools (migra, pgdiff, atlas, pg-schema-diff,
 # liquibase, apgdiff, flyway)

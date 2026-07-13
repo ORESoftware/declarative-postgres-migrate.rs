@@ -3,7 +3,7 @@
 # CLI flag > process env > default declared here.
 
 [help]
-url = "https://github.com/ORESoftware/declarative-postgres-migrate.rs"
+url = "https://github.com/declarative-migrations/declarative-postgres-migrate.rs"
 columns = ["options", "env", "type", "default", "description"]
 
 [parse]

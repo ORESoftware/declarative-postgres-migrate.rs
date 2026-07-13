@@ -47,7 +47,7 @@ else
 
 Install:
 \`\`\`
-curl -fsSL https://raw.githubusercontent.com/ORESoftware/declarative-postgres-migrate.rs/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/declarative-migrations/declarative-postgres-migrate.rs/main/scripts/install.sh | bash
 \`\`\`"
 fi
 gh release view "$tag" --json assets -q '.assets[].name'
