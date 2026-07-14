@@ -229,6 +229,7 @@ pub fn truncate_sql(stmt: &str) -> String {
     }
 }
 
+#[derive(Debug)]
 pub struct ApplyReport {
     pub executed: usize,
 }

@@ -1,6 +1,6 @@
 [package]
 name = "declarative-postgres-migrate"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Declarative, ORM-agnostic Postgres schema migration: introspect two databases (or SQL files / saved catalogs), diff the catalogs, and emit reviewable SQL that converges the target onto the source."
@@ -32,6 +32,9 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 toml = "0.8"
+
+[dev-dependencies]
+proptest = "1"
 
 [profile.release]
 lto = true

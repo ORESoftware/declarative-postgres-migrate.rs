@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # weekly full cross-checker matrix
 
 jobs:
   test:
@@ -28,3 +30,53 @@ jobs:
         env:
           DPM_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres
         run: cargo test -- --test-threads=4
+
+  crosscheck-matrix:
+    # The full 7-tool countersigning matrix: every fixture verified by
+    # migra, pgdiff, atlas, pg-schema-diff, liquibase, apgdiff, and flyway.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install the seven cross-checkers
+        run: |
+          set -euo pipefail
+          pipx install migra
+          go install github.com/joncrlsn/pgdiff@latest
+          go install github.com/stripe/pg-schema-diff/cmd/pg-schema-diff@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          curl -sSf https://atlasgo.sh | sh
+          sudo apt-get update -qq && sudo apt-get install -y -qq apgdiff postgresql-client
+          LB=4.32.0
+          curl -fsSL -o /tmp/lb.tar.gz "https://github.com/liquibase/liquibase/releases/download/v${LB}/liquibase-${LB}.tar.gz"
+          sudo mkdir -p /opt/liquibase && sudo tar -xzf /tmp/lb.tar.gz -C /opt/liquibase
+          echo "/opt/liquibase" >> "$GITHUB_PATH"
+          FW=11.8.2
+          curl -fsSL -o /tmp/fw.tar.gz "https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/${FW}/flyway-commandline-${FW}-linux-x64.tar.gz"
+          sudo tar -xzf /tmp/fw.tar.gz -C /opt
+          echo "/opt/flyway-${FW}" >> "$GITHUB_PATH"
+      - name: Verify all seven are present
+        run: |
+          set -euo pipefail
+          for t in migra pgdiff atlas pg-schema-diff liquibase apgdiff flyway; do
+            command -v "$t" || { echo "MISSING: $t"; exit 1; }
+          done
+      - name: Run the cross-checker matrix
+        env:
+          DPM_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres
+        run: cargo test --test convergence matrix_ -- --test-threads=4

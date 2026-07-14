@@ -842,3 +842,119 @@ async fn verify_leaves_no_shadow_databases_behind() {
     source_db.drop_db().await;
     target_db.drop_db().await;
 }
+
+// ===========================================================================
+// Migrations over POPULATED tables: schema convergence is necessary but not
+// sufficient — the data must survive, constraints must actually validate
+// against real rows, and invalid data must fail loudly.
+// ===========================================================================
+
+#[tokio::test]
+async fn populated_table_migration_preserves_data() {
+    let Some(admin) = admin_url() else { return };
+    let (source_db, target_db) = setup_pair(
+        &admin,
+        // Desired: widened type, new NOT NULL default column, check + unique
+        // over existing data, FK to a lookup table, index on a live column.
+        "CREATE TABLE lookup (code integer PRIMARY KEY);
+         CREATE TABLE readings (
+           id bigint NOT NULL,
+           sensor integer NOT NULL,
+           value bigint NOT NULL,
+           label text NOT NULL DEFAULT 'unlabeled',
+           CONSTRAINT readings_pkey PRIMARY KEY (id),
+           CONSTRAINT readings_sensor_fkey FOREIGN KEY (sensor) REFERENCES lookup(code),
+           CONSTRAINT readings_value_pos CHECK (value >= 0),
+           CONSTRAINT readings_id_uniq UNIQUE (id)
+         );
+         CREATE INDEX readings_sensor_idx ON readings (sensor);",
+        // Current: 50k live rows, narrower type, none of the constraints.
+        "CREATE TABLE lookup (code integer PRIMARY KEY);
+         INSERT INTO lookup SELECT g FROM generate_series(0, 9) g;
+         CREATE TABLE readings (
+           id bigint NOT NULL,
+           sensor integer NOT NULL,
+           value integer NOT NULL,
+           CONSTRAINT readings_pkey PRIMARY KEY (id)
+         );
+         INSERT INTO readings (id, sensor, value)
+           SELECT g, g % 10, (g * 7) % 100000 FROM generate_series(1, 50000) g;",
+    )
+    .await;
+
+    let mut conn = dpm::introspect::connect(&target_db.url).await.unwrap();
+    let (count_before, sum_before): (i64, i64) =
+        sqlx::query_as("SELECT count(*), sum(value)::bigint FROM public.readings")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(count_before, 50_000);
+
+    let source = introspect_url(&source_db.url, &opts()).await.unwrap();
+    let target = introspect_url(&target_db.url, &opts()).await.unwrap();
+    let plan = diff(&source, &target);
+    let script = emit(&plan, &EmitOptions { allow_destructive: true, ..Default::default() });
+    // The FK/check on an existing table must take the NOT VALID + VALIDATE path.
+    assert!(script.sql.contains("NOT VALID"), "{}", script.sql);
+    assert!(script.sql.contains("VALIDATE CONSTRAINT"), "{}", script.sql);
+
+    apply_script(&target_db.url, &script.sql)
+        .await
+        .unwrap_or_else(|e| panic!("populated migration failed: {e:#}\n{}", script.sql));
+
+    // Schema converged…
+    let migrated = introspect_url(&target_db.url, &opts()).await.unwrap();
+    let residual = diff(&source, &migrated);
+    assert!(residual.is_empty(), "{}", emit(&residual, &EmitOptions::default()).sql);
+
+    // …and the data survived: same row count, same value checksum, new
+    // column backfilled with its default, widened type holds the old values.
+    let (count_after, sum_after): (i64, i64) =
+        sqlx::query_as("SELECT count(*), sum(value)::bigint FROM public.readings")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!((count_before, sum_before), (count_after, sum_after), "data changed during migration");
+    let unlabeled: i64 = sqlx::query_scalar("SELECT count(*) FROM public.readings WHERE label = 'unlabeled'")
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(unlabeled, 50_000, "NOT NULL DEFAULT column must backfill every row");
+
+    source_db.drop_db().await;
+    target_db.drop_db().await;
+}
+
+/// When existing data VIOLATES a constraint the desired schema adds, the
+/// migration must fail loudly at VALIDATE time — never silently succeed.
+#[tokio::test]
+async fn constraint_violated_by_existing_data_fails_loudly() {
+    let Some(admin) = admin_url() else { return };
+    let (source_db, target_db) = setup_pair(
+        &admin,
+        "CREATE TABLE m (id bigint PRIMARY KEY, v integer NOT NULL,
+           CONSTRAINT m_v_small CHECK (v < 100));",
+        "CREATE TABLE m (id bigint PRIMARY KEY, v integer NOT NULL);
+         INSERT INTO m SELECT g, g FROM generate_series(1, 500) g;",
+    )
+    .await;
+
+    let source = introspect_url(&source_db.url, &opts()).await.unwrap();
+    let target = introspect_url(&target_db.url, &opts()).await.unwrap();
+    let script = emit(&diff(&source, &target), &EmitOptions { allow_destructive: true, ..Default::default() });
+
+    let err = apply_script(&target_db.url, &script.sql)
+        .await
+        .expect_err("rows with v >= 100 must make VALIDATE fail");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("m_v_small"), "error must name the constraint: {msg}");
+
+    // Fail-loud also means fail-atomic for the transactional part: the
+    // constraint must not exist afterwards in any half-applied form.
+    let migrated = introspect_url(&target_db.url, &opts()).await.unwrap();
+    let table = migrated.tables.values().next().unwrap();
+    assert!(!table.constraints.contains_key("m_v_small"), "no half-applied constraint");
+
+    source_db.drop_db().await;
+    target_db.drop_db().await;
+}
