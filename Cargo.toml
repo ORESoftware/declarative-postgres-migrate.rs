@@ -5,7 +5,11 @@ edition = "2021"
 license = "MIT"
 description = "Declarative, ORM-agnostic Postgres schema migration: introspect two databases (or SQL files / saved catalogs), diff the catalogs, and emit reviewable SQL that converges the target onto the source."
 repository = "https://github.com/declarative-migrations/declarative-postgres-migrate.rs"
+homepage = "https://declarative-migrations.github.io"
 readme = "readme.md"
+keywords = ["postgres", "migration", "schema", "diff", "database"]
+categories = ["database", "command-line-utilities", "development-tools"]
+exclude = [".github/", "docs/", "tests/", "scripts/publish/"]
 
 [lib]
 name = "dpm"
