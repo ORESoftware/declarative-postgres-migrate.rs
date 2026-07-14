@@ -8,7 +8,7 @@ say() { printf '==> %s\n' "$*"; }
 
 # migra (Python)
 if have migra; then say "migra: already installed"
-elif have pipx; then say "migra: pipx install"; pipx install migra
+elif have pipx; then say "migra: pipx install"; pipx install migra && pipx inject migra 'setuptools<81' psycopg2-binary
 elif have pip3; then say "migra: pip3 --user install"; pip3 install --user migra psycopg2-binary
 else say "migra: SKIPPED (need pipx or pip3)"; fi
 

@@ -57,7 +57,8 @@ jobs:
         run: |
           set -euo pipefail
           pipx install migra
-          pipx inject migra 'setuptools<81'  # schemainspect needs pkg_resources; removed in setuptools 81
+          # schemainspect needs pkg_resources (removed in setuptools 81); the pg driver is an extra
+          pipx inject migra 'setuptools<81' psycopg2-binary
           go install github.com/joncrlsn/pgdiff@latest
           go install github.com/stripe/pg-schema-diff/cmd/pg-schema-diff@latest
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
