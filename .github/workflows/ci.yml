@@ -57,6 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           pipx install migra
+          pipx inject migra setuptools  # schemainspect needs pkg_resources; py3.12 venvs dropped it
           go install github.com/joncrlsn/pgdiff@latest
           go install github.com/stripe/pg-schema-diff/cmd/pg-schema-diff@latest
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
