@@ -11,6 +11,9 @@ curl -fsSL https://raw.githubusercontent.com/declarative-migrations/declarative-
 # Homebrew
 brew install declarative-migrations/tap/dpm
 
+# crates.io (installs the `dpm` CLI; the same crate exposes the `dpm` library)
+cargo install declarative-postgres-migrate
+
 # From source
 cargo install --git https://github.com/declarative-migrations/declarative-postgres-migrate.rs
 

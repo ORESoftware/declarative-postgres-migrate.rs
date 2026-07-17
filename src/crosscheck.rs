@@ -22,7 +22,7 @@
 //! fresh replica of the target.
 //!
 //! None of these are build dependencies — binaries are located on PATH (or
-//! via DPM_<TOOL>_BIN) at runtime, and `scripts/install-crosscheckers.sh`
+//! via `DPM_<TOOL>_BIN`) at runtime, and `scripts/install-crosscheckers.sh`
 //! installs all seven.
 
 use anyhow::{Context, Result};
@@ -417,7 +417,7 @@ pub fn run_pg_schema_diff(bin: &str, _pg_dump: &str, migrated_url: &str, source_
 // ---------------------------------------------------------------------------
 
 /// liquibase OSS `diff` compares two live databases over JDBC. Agreement =
-/// every "Missing/Unexpected/Changed <object>(s):" category reports NONE.
+/// every `Missing/Unexpected/Changed <object>(s):` category reports NONE.
 pub fn run_liquibase(bin: &str, migrated_url: &str, source_url: &str) -> CheckReport {
     let name = "liquibase";
     if !binary_exists(bin) {

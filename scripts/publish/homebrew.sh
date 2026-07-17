@@ -27,9 +27,10 @@ mkdir -p "$workdir/tap/Formula"
 
 cat > "$workdir/tap/Formula/dpm.rb" <<RUBY
 class Dpm < Formula
-  desc "Declarative, ORM-agnostic Postgres schema migration (diff two databases)"
+  desc "Declarative PostgreSQL and CockroachDB schema migration"
   homepage "https://github.com/$repo"
   url "$tarball"
+  version "$version"
   sha256 "$sha"
   license "MIT"
   head "https://github.com/$repo.git", branch: "main"

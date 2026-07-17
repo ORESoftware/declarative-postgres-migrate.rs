@@ -12,8 +12,8 @@
 //! - [`model`]: the serializable [`model::Catalog`] snapshot.
 //! - [`introspect`]: live database → `Catalog` (canonical `search_path = ''`
 //!   deparsing, extension-owned objects excluded).
-//! - [`diff`]: `Catalog` × `Catalog` → typed [`diff::Plan`]. Pure.
-//! - [`emit`]: `Plan` → ordered SQL script with destructive-change gating.
+//! - [`diff()`]: `Catalog` × `Catalog` → typed [`diff::Plan`]. Pure.
+//! - [`emit()`]: `Plan` → ordered SQL script with destructive-change gating.
 //! - [`apply`]: statement-splitting executor.
 //! - [`verify`]: replay the migration on a shadow replica and prove
 //!   convergence; optional external cross-checkers (migra, pgdiff, ...).
