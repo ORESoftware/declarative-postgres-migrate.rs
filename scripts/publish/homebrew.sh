@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish/refresh the Homebrew formula in the declarative-migrations/homebrew-tap repo.
-# Builds a source-based formula pinned to the release tag's tarball, so it
-# works on any mac/linuxbrew arch (depends_on rust => build).
+# Publishes a formula pinned to the release workflow's prebuilt binaries for
+# Apple Silicon, Intel macOS, ARM64 Linux, and x86_64 Linux.
 # Usage: scripts/publish/homebrew.sh [vX.Y.Z]
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -10,10 +10,25 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 tag="${1:-v$version}"
 repo="declarative-migrations/declarative-postgres-migrate.rs"
 tap_repo="declarative-migrations/homebrew-tap"
-tarball="https://github.com/$repo/archive/refs/tags/$tag.tar.gz"
+release_base="https://github.com/$repo/releases/download/$tag"
 
-echo "==> computing source tarball sha256 for $tag"
-sha=$(curl -fsSL "$tarball" | shasum -a 256 | cut -d' ' -f1)
+asset_url() {
+  printf '%s/dpm-%s-%s.tar.gz' "$release_base" "$tag" "$1"
+}
+
+asset_sha() {
+  curl -fsSL "$1" | shasum -a 256 | cut -d' ' -f1
+}
+
+echo "==> computing release artifact sha256 values for $tag"
+mac_arm_url=$(asset_url aarch64-apple-darwin)
+mac_intel_url=$(asset_url x86_64-apple-darwin)
+linux_arm_url=$(asset_url aarch64-unknown-linux-gnu)
+linux_intel_url=$(asset_url x86_64-unknown-linux-gnu)
+mac_arm_sha=$(asset_sha "$mac_arm_url")
+mac_intel_sha=$(asset_sha "$mac_intel_url")
+linux_arm_sha=$(asset_sha "$linux_arm_url")
+linux_intel_sha=$(asset_sha "$linux_intel_url")
 
 workdir=$(mktemp -d); trap 'rm -rf "$workdir"' EXIT
 if gh repo view "$tap_repo" >/dev/null 2>&1; then
@@ -29,16 +44,31 @@ cat > "$workdir/tap/Formula/dpm.rb" <<RUBY
 class Dpm < Formula
   desc "Declarative PostgreSQL and CockroachDB schema migration"
   homepage "https://github.com/$repo"
-  url "$tarball"
   version "$version"
-  sha256 "$sha"
   license "MIT"
-  head "https://github.com/$repo.git", branch: "main"
 
-  depends_on "rust" => :build
+  on_macos do
+    if Hardware::CPU.arm?
+      url "$mac_arm_url"
+      sha256 "$mac_arm_sha"
+    else
+      url "$mac_intel_url"
+      sha256 "$mac_intel_sha"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "$linux_arm_url"
+      sha256 "$linux_arm_sha"
+    else
+      url "$linux_intel_url"
+      sha256 "$linux_intel_sha"
+    end
+  end
 
   def install
-    system "cargo", "install", *std_cargo_args
+    bin.install "dpm"
     pkgshare.install ".cli-flags.toml"
   end
 
