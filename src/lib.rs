@@ -24,6 +24,7 @@
 pub mod advisor;
 pub mod ai;
 pub mod apply;
+pub mod canonicalize;
 pub mod crosscheck;
 pub mod diff;
 pub mod emit;

@@ -136,13 +136,22 @@ pub async fn materialize_catalog(
         db.drop_db().await;
         return Err(e).with_context(|| format!("bootstrapping the {label} replica on the shadow server failed"));
     }
-    let replica_cat = match introspect::introspect_url(&db.url, opts).await {
+    let mut replica_cat = match introspect::introspect_url(&db.url, opts).await {
         Ok(c) => c,
         Err(e) => {
             db.drop_db().await;
             return Err(e);
         }
     };
+    // The replica was built from dpm's own emitted deparse, so its CHECK and
+    // index defs are the re-parse fixed point; canonicalize before comparing
+    // against the (already canonicalized) catalog.
+    if let Err(e) =
+        crate::canonicalize::canonicalize_defs(&mut [&mut replica_cat], shadow_server_url, verbose).await
+    {
+        db.drop_db().await;
+        return Err(e);
+    }
     let drift = diff(cat, &replica_cat);
     if !drift.is_empty() {
         let drift_sql = emit(
@@ -178,7 +187,8 @@ async fn run_on_replica(p: &VerifyParams<'_>, migration_sql: &str, replica: &Sha
         crate::apply::apply_script(&replica.url, &bootstrap.sql)
             .await
             .context("bootstrapping the target replica on the shadow server failed")?;
-        let replica_cat = introspect::introspect_url(&replica.url, p.introspect).await?;
+        let mut replica_cat = introspect::introspect_url(&replica.url, p.introspect).await?;
+        crate::canonicalize::canonicalize_defs(&mut [&mut replica_cat], p.shadow_server_url, p.verbose).await?;
         let drift = diff(p.target, &replica_cat);
         if !drift.is_empty() {
             let drift_sql = emit(
@@ -201,7 +211,8 @@ async fn run_on_replica(p: &VerifyParams<'_>, migration_sql: &str, replica: &Sha
         .context("applying the generated migration to the replica failed")?;
 
     // Re-diff.
-    let migrated = introspect::introspect_url(&replica.url, p.introspect).await?;
+    let mut migrated = introspect::introspect_url(&replica.url, p.introspect).await?;
+    crate::canonicalize::canonicalize_defs(&mut [&mut migrated], p.shadow_server_url, p.verbose).await?;
     let residual = diff(p.source, &migrated);
     let converged = residual.is_empty();
     let residual_sql = if converged {
