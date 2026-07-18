@@ -254,6 +254,46 @@ CREATE INDEX jobs_pending_idx ON public.jobs (state) WHERE state IN ('queued','r
     .await;
 }
 
+/// Regression: the same non-fixed-point deparse bites generated-column
+/// expressions and view bodies, not just CHECK/index defs — both carry the
+/// varchar IN-list shape and dpm compares them as deparsed strings. A database
+/// built from dpm's own emitted CREATE (column / view) must still converge.
+#[tokio::test]
+async fn varchar_in_list_generated_column_and_view_converge() {
+    let Some(admin) = admin_url() else { return };
+    // Generated STORED column whose expression contains a varchar IN-list.
+    assert_converges(
+        &admin,
+        r#"
+CREATE TABLE public.orders (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  status varchar(24) NOT NULL,
+  is_terminal integer GENERATED ALWAYS AS
+    (CASE WHEN status IN ('shipped','cancelled','refunded') THEN 1 ELSE 0 END) STORED
+);
+"#,
+        "",
+        "varchar-in-list-generated-column",
+    )
+    .await;
+    // View whose WHERE contains a varchar IN-list over a base table.
+    assert_converges(
+        &admin,
+        r#"
+CREATE TABLE public.tickets (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  state varchar(24) NOT NULL,
+  title text
+);
+CREATE VIEW public.open_tickets AS
+  SELECT id, title FROM public.tickets WHERE state IN ('open','pending','triage');
+"#,
+        "",
+        "varchar-in-list-view",
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn identical_databases_produce_empty_plan() {
     let Some(admin) = admin_url() else { return };

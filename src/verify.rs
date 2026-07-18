@@ -69,6 +69,22 @@ pub async fn verify(p: VerifyParams<'_>) -> Result<VerifyOutcome> {
             p.target.database_flavor.label()
         );
     }
+    // Canonicalize both reference catalogs so every comparison below is
+    // symmetric with the replicas (which are re-introspected from dpm's own
+    // emitted SQL and canonicalized before diffing). This makes verify()
+    // correct regardless of whether the caller pre-canonicalized — the CLI
+    // path does via load_sides; other callers may not — and is a no-op on
+    // already-canonical input (one round-trip is the fixed point).
+    let mut source = p.source.clone();
+    let mut target = p.target.clone();
+    crate::canonicalize::canonicalize_defs(
+        &mut [&mut source, &mut target],
+        p.shadow_server_url,
+        p.verbose,
+    )
+    .await?;
+    let p = VerifyParams { source: &source, target: &target, ..p };
+
     // The migration under test.
     let plan = diff(p.source, p.target);
     let script = emit(

@@ -5,26 +5,27 @@
 //! the original parse as `(col)::text = ANY ((ARRAY['a'::character varying,
 //! ...])::text[])`, but feeding that emitted text back through the parser
 //! stores per-element casts (`ANY (ARRAY[('a'::character varying)::text,
-//! ...])`), which deparses differently. The same shape appears in CHECK
-//! constraints and in partial-index WHERE predicates. Raw string comparison
-//! therefore reports an eternal diff between a freshly-parsed schema and a
-//! database built from dpm's own emitted SQL — the same constraint or index
-//! is dropped and re-created forever.
+//! ...])`), which deparses differently. The same shape appears anywhere dpm
+//! compares a deparsed expression string: CHECK constraints, partial-index
+//! WHERE predicates, generated-column expressions, and view / materialized-
+//! view bodies. Raw string comparison therefore reports an eternal diff
+//! between a freshly-parsed schema and a database built from dpm's own emitted
+//! SQL — the same object is dropped and re-created forever.
 //!
 //! The fix stays true to the project's core idea (the server is the only
-//! trustworthy normalizer — never regex): every CHECK def and index def is
-//! rebuilt once against an empty copy of its table in a throwaway shadow
-//! database, and the re-read deparse is substituted into the catalog. One
-//! round-trip is the fixed point: an already-canonical def re-canonicalizes
-//! to itself, so both sides of any diff land on identical strings regardless
-//! of how their databases were built. Defs that fail to rebuild (extension
-//! types or functions missing on the shadow, etc.) are left untouched —
-//! degraded, never wrong: the worst case is the pre-existing behavior.
+//! trustworthy normalizer — never regex): every such def is rebuilt once in a
+//! throwaway shadow database — CHECK/index/generated against an empty copy of
+//! the owning table, views against copies of all the catalog's tables — and
+//! the re-read deparse is substituted into the catalog. One round-trip is the
+//! fixed point: an already-canonical def re-canonicalizes to itself, so both
+//! sides of any diff land on identical strings regardless of how their
+//! databases were built. Defs that fail to rebuild (a view over other views or
+//! functions, extension types missing on the shadow, etc.) are left untouched
+//! — degraded, never wrong: the worst case is the pre-existing behavior.
 //!
-//! Not yet round-tripped: column defaults and generated expressions (compared
-//! via `Column::semantic_eq`), view bodies, and function bodies. If a
-//! non-fixed-point shape surfaces for those, this module is where its
-//! canonicalization belongs.
+//! Left as-is: column DEFAULT expressions (a default is a single value, not an
+//! IN-list) and function bodies (stored source text, not re-deparsed). If a
+//! non-fixed-point shape surfaces there, this module is where it belongs.
 
 use std::collections::BTreeMap;
 
@@ -48,12 +49,14 @@ pub async fn canonicalize_defs(
     verbose: bool,
 ) -> Result<()> {
     let has_work = catalogs.iter().any(|c| {
-        c.tables.values().any(|t| {
-            !t.indexes.is_empty()
-                || t.constraints
-                    .values()
-                    .any(|k| k.kind == ConstraintKind::Check)
-        })
+        !c.views.is_empty()
+            || c.tables.values().any(|t| {
+                !t.indexes.is_empty()
+                    || t.columns.iter().any(|col| col.generated.is_some())
+                    || t.constraints
+                        .values()
+                        .any(|k| k.kind == ConstraintKind::Check)
+            })
     });
     if !has_work {
         return Ok(());
@@ -133,6 +136,10 @@ async fn canonicalize_on(
     let mut canonical: BTreeMap<(String, String), String> = BTreeMap::new();
 
     for catalog in catalogs.iter_mut() {
+        // Table-scoped defs (CHECK, index, generated-column expressions) resolve
+        // against the owning table's own columns, so they can be canonicalized
+        // per table and shared across catalogs via the (column-signature, def)
+        // cache.
         for (qname, table) in catalog.tables.iter_mut() {
             let sig = column_signature(table);
             let check_defs: Vec<String> = table
@@ -148,41 +155,41 @@ async fn canonicalize_on(
                 .map(|i| i.def.clone())
                 .filter(|d| !canonical.contains_key(&(sig.clone(), d.clone())))
                 .collect();
+            // (column type, generation expression) for generated columns whose
+            // expression is not already canonicalized.
+            let gen_exprs: Vec<(String, String)> = table
+                .columns
+                .iter()
+                .filter_map(|c| c.generated.as_ref().map(|g| (c.type_sql.clone(), g.clone())))
+                .filter(|(_, expr)| !canonical.contains_key(&(sig.clone(), expr.clone())))
+                .collect();
 
-            if !check_defs.is_empty() || !index_defs.is_empty() {
-                // An empty copy of the table under its real name, so index
-                // defs (full CREATE INDEX statements naming the table) and
-                // CHECK defs run verbatim. Sequential processing: a same-name
-                // table from another catalog is simply rebuilt.
+            if !check_defs.is_empty() || !index_defs.is_empty() || !gen_exprs.is_empty() {
+                // An empty copy of the table under its real name, so index defs
+                // (full CREATE INDEX statements naming the table), CHECK defs,
+                // and generated-column expressions run verbatim. Sequential
+                // processing: a same-name table from another catalog is rebuilt.
                 match create_scratch_table(&mut conn, qname, table).await {
                     Ok(()) => {
                         for def in check_defs {
                             let canon = round_trip_check(&mut conn, qname, &def)
                                 .await
-                                .unwrap_or_else(|e| {
-                                    if verbose {
-                                        eprintln!(
-                                            "dpm: canonicalize: CHECK def did not round-trip \
-                                             ({e:#}); comparing it verbatim: {def}"
-                                        );
-                                    }
-                                    def.clone()
-                                });
+                                .unwrap_or_else(|e| warn_verbatim(verbose, "CHECK", &def, &e));
                             canonical.insert((sig.clone(), def), canon);
                         }
                         for def in index_defs {
                             let canon = round_trip_index(&mut conn, qname, &def)
                                 .await
-                                .unwrap_or_else(|e| {
-                                    if verbose {
-                                        eprintln!(
-                                            "dpm: canonicalize: index def did not round-trip \
-                                             ({e:#}); comparing it verbatim: {def}"
-                                        );
-                                    }
-                                    def.clone()
-                                });
+                                .unwrap_or_else(|e| warn_verbatim(verbose, "index", &def, &e));
                             canonical.insert((sig.clone(), def), canon);
+                        }
+                        for (col_type, expr) in gen_exprs {
+                            let canon = round_trip_generated(&mut conn, qname, &col_type, &expr)
+                                .await
+                                .unwrap_or_else(|e| {
+                                    warn_verbatim(verbose, "generated column", &expr, &e)
+                                });
+                            canonical.insert((sig.clone(), expr), canon);
                         }
                     }
                     Err(e) => {
@@ -195,6 +202,9 @@ async fn canonicalize_on(
                         }
                         for d in check_defs.into_iter().chain(index_defs) {
                             canonical.insert((sig.clone(), d.clone()), d);
+                        }
+                        for (_, expr) in gen_exprs {
+                            canonical.insert((sig.clone(), expr.clone()), expr);
                         }
                     }
                 }
@@ -212,10 +222,56 @@ async fn canonicalize_on(
                     idx.def = canon.clone();
                 }
             }
+            for col in table.columns.iter_mut() {
+                if let Some(expr) = col.generated.clone() {
+                    if let Some(canon) = canonical.get(&(sig.clone(), expr)) {
+                        col.generated = Some(canon.clone());
+                    }
+                }
+            }
+        }
+
+        // View bodies reference arbitrarily many tables, so they cannot use the
+        // per-table (signature, def) cache — canonicalize them against a full
+        // set of scratch copies of THIS catalog's tables. A view over other
+        // views or functions will fail to recreate and is left verbatim.
+        if !catalog.views.is_empty() {
+            for (qname, table) in &catalog.tables {
+                if let Err(e) = create_scratch_table(&mut conn, qname, table).await {
+                    if verbose {
+                        eprintln!(
+                            "dpm: canonicalize: scratch copy of {}.{} for view resolution \
+                             failed ({e:#})",
+                            qname.schema, qname.name
+                        );
+                    }
+                }
+            }
+            let mut view_canon: BTreeMap<QName, String> = BTreeMap::new();
+            for (qname, view) in &catalog.views {
+                let canon = round_trip_view(&mut conn, &view.def)
+                    .await
+                    .unwrap_or_else(|e| warn_verbatim(verbose, "view", &view.def, &e));
+                view_canon.insert(qname.clone(), canon);
+            }
+            for (qname, view) in catalog.views.iter_mut() {
+                if let Some(canon) = view_canon.get(qname) {
+                    view.def = canon.clone();
+                }
+            }
         }
     }
     let _ = conn.close().await;
     Ok(())
+}
+
+/// Log (when verbose) that a def could not be round-tripped and will be
+/// compared verbatim, returning the original def for that comparison.
+fn warn_verbatim(verbose: bool, kind: &str, def: &str, err: &anyhow::Error) -> String {
+    if verbose {
+        eprintln!("dpm: canonicalize: {kind} def did not round-trip ({err:#}); comparing it verbatim: {def}");
+    }
+    def.to_string()
 }
 
 fn qualified(qname: &QName) -> String {
@@ -317,6 +373,70 @@ async fn round_trip_index(
         .await
         .context("DROP INDEX failed")?;
     Ok(row.1)
+}
+
+/// Add a throwaway generated column driven by `expr` to the scratch copy, read
+/// back the server's deparse of the generation expression, drop it again. The
+/// expression references only sibling columns of the same table, which the
+/// scratch copy already carries.
+async fn round_trip_generated(
+    conn: &mut sqlx::postgres::PgConnection,
+    qname: &QName,
+    col_type: &str,
+    expr: &str,
+) -> Result<String> {
+    let target = qualified(qname);
+    sqlx::raw_sql(&format!(
+        "ALTER TABLE {target} ADD COLUMN _dpm_canon_gen {col_type} \
+         GENERATED ALWAYS AS ({expr}) STORED"
+    ))
+    .execute(&mut *conn)
+    .await
+    .context("ADD generated COLUMN failed")?;
+    let row: (String,) = sqlx::query_as(
+        "SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid) \
+         FROM pg_catalog.pg_attrdef d \
+         JOIN pg_catalog.pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum \
+         WHERE a.attname = '_dpm_canon_gen' AND d.adrelid = ($1::text)::regclass",
+    )
+    .bind(&target)
+    .fetch_one(&mut *conn)
+    .await
+    .context("reading back canonical generation expression")?;
+    sqlx::raw_sql(&format!("ALTER TABLE {target} DROP COLUMN _dpm_canon_gen"))
+        .execute(&mut *conn)
+        .await
+        .context("DROP generated COLUMN failed")?;
+    Ok(row.0)
+}
+
+/// Recreate the view body under a throwaway name against the scratch tables,
+/// read back `pg_get_viewdef`, drop it again. `def` is the stored view body
+/// (the SELECT from `pg_get_viewdef`); a regular view suffices to canonicalize
+/// a materialized view's body since the deparse form is identical.
+async fn round_trip_view(
+    conn: &mut sqlx::postgres::PgConnection,
+    def: &str,
+) -> Result<String> {
+    sqlx::raw_sql("DROP VIEW IF EXISTS public._dpm_canon_view")
+        .execute(&mut *conn)
+        .await
+        .ok();
+    sqlx::raw_sql(&format!("CREATE VIEW public._dpm_canon_view AS {def}"))
+        .execute(&mut *conn)
+        .await
+        .context("CREATE VIEW failed")?;
+    let row: (String,) = sqlx::query_as(
+        "SELECT pg_catalog.pg_get_viewdef('public._dpm_canon_view'::regclass, true)",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .context("reading back canonical view def")?;
+    sqlx::raw_sql("DROP VIEW public._dpm_canon_view")
+        .execute(&mut *conn)
+        .await
+        .context("DROP VIEW failed")?;
+    Ok(row.0)
 }
 
 /// Identity of the column environment an expression parses against.
